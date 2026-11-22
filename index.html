@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a2540">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Placement Prep">
+<title>Placement Prep</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="boot" class="wrap" style="padding-top:30vh;text-align:center"><div class="muted">Loading your prep…</div></div>
+<div id="auth" class="wrap" hidden></div>
+<div id="onb" class="wrap" hidden></div>
+<div id="app" hidden>
+<header class="wrap">
+  <div class="row2" style="align-items:flex-start;flex-wrap:nowrap">
+    <div><h1 id="hTitle">Placement prep</h1><p class="sub" id="hsub"></p></div>
+    <span class="sp"></span>
+    <button class="pri eoibtn" id="eoiTop" data-eoi="1" aria-label="EOI check">EOI</button>
+  </div>
+</header>
+<nav><div class="wrap" id="nav">
+<a href="#today" data-v="today">Today</a><a href="#study" data-v="study">Study</a><a href="#companies" data-v="companies">Companies</a><a href="#cv" data-v="cv">CV board</a><a href="#practice" data-v="practice">Mock interview</a><a href="#season" data-v="season">Season &amp; EOI</a><a href="#me" data-v="me">Me</a>
+</div></nav>
+<main class="wrap">
+<section class="view" id="v-today"></section>
+<section class="view" id="v-study"></section>
+<section class="view" id="v-companies"></section>
+<section class="view" id="v-cv"></section>
+<section class="view" id="v-practice"></section>
+<section class="view" id="v-season"></section>
+<section class="view" id="v-me"></section>
+</main>
+</div>
+<div id="modal" class="modal" hidden><div class="mbox" role="dialog" aria-modal="true"><div id="mbody"></div></div></div>
+<div id="toast" class="toast" hidden></div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>
