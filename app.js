@@ -4,7 +4,7 @@ import { MODS, BANK, COMPANIES, CAT2MODS, ROLEGROUPS, HRQ, CATLAB } from './cont
 
 const SB_URL = 'https://towxfwpgywxbqfrppidu.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRvd3hmd3BneXd4YnFmcnBwaWR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ5OTM2NTQsImV4cCI6MjExMDU2OTY1NH0.WAsgBwGN3bN46GzMPziMpjmZtHeBrFLh3kaRpV4SfYs';
-const sb = createClient(SB_URL, SB_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false } });
+const sb = createClient(SB_URL, SB_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -183,12 +183,14 @@ async function ai(task, payload) {
 }
 
 /* ---------- boot ---------- */
+let RECOVERY = /type=recovery/.test(location.hash);
 async function boot() {
   const { data } = await sb.auth.getSession();
+  if (RECOVERY || /type=recovery/.test(location.hash)) return showNewPassword();
   if (!data.session) return showAuth();
   USER = data.session.user; await loadAll();
 }
-sb.auth.onAuthStateChange((ev, session) => { if (ev === 'SIGNED_OUT') { USER = null; location.hash = ''; showAuth() } });
+sb.auth.onAuthStateChange((ev, session) => { if (ev === 'PASSWORD_RECOVERY') { RECOVERY = true; showNewPassword(); return } if (ev === 'SIGNED_OUT') { USER = null; location.hash = ''; showAuth() } });
 async function loadAll() {
   const [pr, st, co] = await Promise.all([
     sb.from('pp_profiles').select('*').eq('id', USER.id).maybeSingle(),
@@ -199,7 +201,8 @@ async function loadAll() {
   const shared = {}; (co.data || []).forEach(r => shared[r.id] = r.data);
   const missing = COMPANIES.filter(c => !shared[c.id]);
   if (missing.length) { await sb.from('pp_companies').insert(missing.map(c => ({ id: c.id, data: c, created_by: USER.id }))).then(() => { }); missing.forEach(c => shared[c.id] = c) }
-  CO = Object.values(shared).map(c => ({ mods: ['story'], jd: [], expect: [], ask: [], kw: [], ...c }));
+  const code = Object.fromEntries(COMPANIES.map(c => [c.id, c]));
+  CO = Object.values(shared).map(c => { const k = code[c.id]; const m = k ? { ...k, ...c, mods: [...new Set([...(k.mods || []), ...(c.mods || [])])] } : c; return { mods: ['story'], jd: [], expect: [], ask: [], kw: [], ...m } });
   CO.sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
   MODEL = null;
   $('#boot').hidden = true; $('#auth').hidden = true;
@@ -209,22 +212,53 @@ async function loadAll() {
 }
 
 /* ---------- auth ---------- */
-function showAuth() {
+function authShell(inner) {
   $('#boot').hidden = true; $('#app').hidden = true; $('#onb').hidden = true; const a = $('#auth'); a.hidden = false;
-  a.innerHTML = `<div style="max-width:420px;margin:12vh auto 0"><h1>Placement prep</h1><p class="sub">Your season, your CV, your companies. Sign in or create an account.</p>
-  <div class="panel mt"><label class="f" for="em">Email</label><input id="em" type="email" autocomplete="email" inputmode="email">
-  <label class="f" for="pw">Password</label><input id="pw" type="password" autocomplete="current-password" placeholder="At least 6 characters">
-  <div class="row2 mt"><button class="pri" id="si">Sign in</button><button id="su">Create account</button></div><p class="note" id="am"></p></div>
+  a.innerHTML = `<div style="max-width:420px;margin:10vh auto 0;padding:0 4px"><h1>Placement prep</h1>${inner}
   <p class="note mt">On iPhone: open this page in Safari, tap Share, then Add to Home Screen. On Android: open in Chrome, tap ⋮, then Install app or Add to Home screen.</p></div>`;
-  const go = async (up) => {
-    const email = $('#em').value.trim(), password = $('#pw').value; if (!email || password.length < 6) { $('#am').textContent = 'Enter your email and a password of at least 6 characters.'; return }
-    $('#am').textContent = up ? 'Creating your account…' : 'Signing in…';
-    let r = up ? await sb.auth.signUp({ email, password }) : await sb.auth.signInWithPassword({ email, password });
-    if (up && !r.error && !r.data.session) r = await sb.auth.signInWithPassword({ email, password });
-    if (r.error) { $('#am').textContent = r.error.message.includes('Invalid login') ? 'Wrong email or password.' : r.error.message; return }
-    USER = r.data.session.user; $('#auth').hidden = true; $('#boot').hidden = false; await loadAll()
+}
+const pwField = (id, ac, ph) => `<label class="f" for="${id}">Password</label><input id="${id}" type="password" autocomplete="${ac}" placeholder="${ph}"><label class="note" style="display:flex;gap:6px;align-items:center;margin-top:4px"><input type="checkbox" data-show="${id}" style="width:auto"> Show password</label>`;
+function wireShow() { document.querySelectorAll('[data-show]').forEach(c => c.onchange = () => { $('#' + c.dataset.show).type = c.checked ? 'text' : 'password' }) }
+function authMsg(m) { const r = m || ''; if (/invalid login/i.test(r)) return 'That email and password don\'t match an account. If you made an account earlier (even in another app of yours that uses the same login), use that password, or tap Forgot password.'; if (/rate limit/i.test(r)) return 'Too many attempts in a short time. Wait a few minutes and try again.'; if (/already registered|already exists/i.test(r)) return 'This email already has an account. Sign in instead, or tap Forgot password.'; if (/failed to fetch|network/i.test(r)) return 'No internet connection. Check your network and try again.'; return r }
+function showAuth(mode) {
+  mode = mode || 'in'; const up = mode === 'up';
+  authShell(`<p class="sub">${up ? 'Create your account. Use any email and a password you\'ll remember.' : 'Sign in to your account.'}</p>
+  <div class="panel mt"><label class="f" for="em">Email</label><input id="em" type="email" autocomplete="email" inputmode="email" autocapitalize="none" spellcheck="false">
+  ${pwField('pw', up ? 'new-password' : 'current-password', 'At least 6 characters')}
+  <div class="row2 mt"><button class="pri" id="go">${up ? 'Create account' : 'Sign in'}</button><span class="sp"></span>${up ? '' : '<button id="fp">Forgot password</button>'}</div><p class="note" id="am" role="status"></p>
+  <p class="note mt">${up ? 'Already have an account? <a href="javascript:void 0" id="sw">Sign in</a>' : 'New here? <a href="javascript:void 0" id="sw">Create an account</a>'}</p></div>`);
+  wireShow(); $('#sw').onclick = () => showAuth(up ? 'in' : 'up');
+  const val = () => { const email = $('#em').value.trim().toLowerCase(), password = $('#pw').value; if (!/^\S+@\S+\.\S+$/.test(email)) { $('#am').textContent = 'Enter a valid email address.'; return null } return { email, password } };
+  const go = async () => {
+    const v = val(); if (!v) return; if (v.password.length < 6) { $('#am').textContent = 'The password needs at least 6 characters.'; return }
+    $('#go').disabled = true; $('#am').textContent = up ? 'Creating your account…' : 'Signing in…';
+    try {
+      let r;
+      if (up) {
+        r = await sb.auth.signUp({ email: v.email, password: v.password });
+        if (!r.error && r.data.user && Array.isArray(r.data.user.identities) && r.data.user.identities.length === 0) { $('#am').textContent = 'This email already has an account. Tap Sign in below and use its password, or use Forgot password.'; return }
+        if (!r.error && !r.data.session) r = await sb.auth.signInWithPassword(v);
+      } else r = await sb.auth.signInWithPassword(v);
+      if (r.error) { $('#am').textContent = authMsg(r.error.message); return }
+      USER = r.data.session.user; $('#auth').hidden = true; $('#boot').hidden = false; await loadAll()
+    } catch (e) { $('#am').textContent = authMsg(e.message) } finally { const b = $('#go'); if (b) b.disabled = false }
   };
-  $('#si').onclick = () => go(false); $('#su').onclick = () => go(true); $('#pw').onkeydown = e => { if (e.key === 'Enter') go(false) }
+  $('#go').onclick = go; $('#pw').onkeydown = e => { if (e.key === 'Enter') go() };
+  if ($('#fp')) $('#fp').onclick = async () => {
+    const email = $('#em').value.trim().toLowerCase(); if (!/^\S+@\S+\.\S+$/.test(email)) { $('#am').textContent = 'Type your email above first, then tap Forgot password.'; return }
+    $('#am').textContent = 'Sending…'; const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + '/' });
+    $('#am').textContent = error ? authMsg(error.message) : 'Check your email for a reset link (also the spam folder). Open it on this phone; it brings you back here to set a new password.';
+  };
+}
+function showNewPassword() {
+  authShell(`<p class="sub">Set a new password.</p><div class="panel mt">${pwField('np', 'new-password', 'At least 6 characters')}<div class="row2 mt"><button class="pri" id="npGo">Save password</button></div><p class="note" id="am" role="status"></p></div>`);
+  wireShow();
+  $('#npGo').onclick = async () => {
+    const pw = $('#np').value; if (pw.length < 6) { $('#am').textContent = 'At least 6 characters.'; return }
+    $('#am').textContent = 'Saving…'; const { data, error } = await sb.auth.updateUser({ password: pw });
+    if (error) { $('#am').textContent = authMsg(error.message) + ' If the link expired, request a new one.'; return }
+    RECOVERY = false; history.replaceState(null, '', location.pathname); USER = data.user; $('#auth').hidden = true; $('#boot').hidden = false; await loadAll()
+  };
 }
 
 /* ---------- onboarding ---------- */
@@ -422,7 +456,7 @@ function renderStudy() {
 }
 function bankRow(b) {
   const cos = (b.co || []).map(id => coById(id)).filter(Boolean).map(c => c.name.split(' ')[0]);
-  return `<details class="hist" style="padding:8px 0"><summary style="color:var(--ink)"><span class="row2" style="display:inline-flex;gap:8px"><input type="checkbox" data-ck="b:${b.id}"${ck('b:' + b.id) ? ' checked' : ''} aria-label="Practised" onclick="event.stopPropagation()"><span class="chip">${esc(b.cat)}</span>${b.ind ? `<span class="chip">${esc(b.ind)}</span>` : ''}${b.src === 'cv' ? '<span class="chip warn">From your CV</span>' : b.src ? `<span class="chip">${esc(b.src)}</span>` : ''}${cos.length ? `<span class="chip">${esc(cos.join(', '))}</span>` : ''}</span><div style="margin:6px 0 0 28px">${esc(b.q)}</div></summary><div class="body" style="margin-left:28px">${b.how}</div></details>`
+  return `<details class="hist" style="padding:8px 0"><summary style="color:var(--ink)"><span class="row2" style="display:inline-flex;gap:8px"><input type="checkbox" data-ck="b:${b.id}"${ck('b:' + b.id) ? ' checked' : ''} aria-label="Practised" onclick="event.stopPropagation()"><span class="chip">${esc(b.cat)}</span>${b.ind ? `<span class="chip">${esc(b.ind)}</span>` : ''}${b.src === 'cv' ? '<span class="chip warn">From your CV</span>' : b.src ? `<span class="chip">${esc(b.src)}</span>` : ''}${cos.length ? `<span class="chip">${esc(cos.join(', '))}</span>` : ''}</span><div style="margin:6px 0 0 28px">${esc(b.q)}</div></summary><div class="body" style="margin-left:28px">${b.how}${b.full ? `<details class="hist mt"><summary style="color:var(--acc,#7cc4ff)">Full walkthrough (interview style)</summary><div class="body">${b.full}</div></details>` : ''}</div></details>`
 }
 function hrBank() {
   const ans = (P.cv && P.cv.hr) || {};
