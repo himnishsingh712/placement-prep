@@ -34,6 +34,8 @@ const subsFor = t => (t.sub || []).filter(id => bankOk(bankById(id)));
 const ck = id => !!S.c[id];
 function setCk(id, v) { if (v) S.c[id] = Date.now(); else delete S.c[id]; save(); renderAll() }
 const nt = (k, d) => S.n[k] != null ? S.n[k] : d;
+function tCount(t) { const sb_ = subsFor(t); return t.sub && sb_.length ? [sb_.filter(b => ck('b:' + b)).length, sb_.length] : [ck(t.id) ? 1 : 0, 1] }
+const sumT = ts => ts.reduce((a, t) => { const [d, n] = tCount(t); return [a[0] + d, a[1] + n] }, [0, 0]);
 function tProg(t) { const sb_ = subsFor(t); if (t.sub && sb_.length) return sb_.filter(b => ck('b:' + b)).length / sb_.length; return ck(t.id) ? 1 : 0 }
 const CVP = () => (P && P.cv && P.cv.pointers) || [];
 function cvProg(p) { return ['s', 'n', 'k'].filter(x => ck('cv:' + p.id + ':' + x)).length / 3 }
@@ -58,8 +60,8 @@ function cvFor(c) {
   const sc = CVP().map(p => { const txt = (p.t + ' ' + (p.k || '')).toLowerCase(); return [p.id, kw.filter(k => txt.includes(k)).length] }).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]);
   return sc.slice(0, 7).map(x => x[0])
 }
-function itemsFor(c) { const ts = topicsFor(c), cv = cvFor(c); const ps = ts.map(tProg).concat(cv.map(id => cvProg(CVP().find(p => p.id === id)))).concat([ck('co:' + c.id + ':why') ? 1 : 0]); return { done: ps.reduce((a, b) => a + b, 0), total: ps.length } }
-function allItems() { const ps = TOPICS.map(tProg).concat(CVP().map(cvProg)).concat(liveCos().map(c => ck('co:' + c.id + ':why') ? 1 : 0)); return { done: ps.reduce((a, b) => a + b, 0), total: ps.length } }
+function itemsFor(c) { const [td, tn] = sumT(topicsFor(c)); const cv = cvFor(c).map(id => cvProg(CVP().find(p => p.id === id))); return { done: td + cv.reduce((a, b) => a + b, 0) + (ck('co:' + c.id + ':why') ? 1 : 0), total: tn + cv.length + 1 } }
+function allItems() { const [td, tn] = sumT(TOPICS.filter(t => !t.co || liveCos().some(c => t.co.includes(c.id)))); const cv = CVP().map(cvProg); const w = liveCos().map(c => ck('co:' + c.id + ':why') ? 1 : 0); return { done: td + cv.reduce((a, b) => a + b, 0) + w.reduce((a, b) => a + b, 0), total: tn + cv.length + w.length } }
 const pct = r => Math.round(r.done / Math.max(1, r.total) * 100);
 
 /* ---------- EOI model (logistic, Bayesian prior; from the EOI or EONI? trainer) ---------- */
@@ -337,7 +339,7 @@ function renderAll() {
 }
 
 /* ---------- Do next ---------- */
-const MODBOOST = { story: 3.2, case: 2.3, guess: 2.3, ind: 2.0, digital: 1.5, tech: 1.5, mkt: 1.3, b2b: 1.1, sales: .9, saas: .9 };
+const MODBOOST = { ai: 1.9, story: 3.2, case: 2.3, guess: 2.3, ind: 2.0, digital: 1.5, tech: 1.5, mkt: 1.3, b2b: 1.1, sales: .9, saas: .9 };
 function candidates(onlyCo) {
   const out = []; const live = onlyCo ? [onlyCo] : liveCos();
   TOPICS.forEach(t => { if (tProg(t) >= 1) return; const rel = live.filter(c => topicsFor(c).includes(t)); if (!rel.length && !['story'].includes(t.mod)) return; let sc = (MODBOOST[t.mod] || 1) * (1 + rel.reduce((a, c) => a + wt(c), 0)) * (1 - (t.i || 0) * .04) * (t.pri || 1); out.push({ id: t.id, l: t.t, sub: modById(t.mod).n, sc, go: 'study:' + t.mod + '#' + t.id, kind: 't' }) });
@@ -381,7 +383,7 @@ function renderToday() {
   let h = '';
   if (sl.length) {
     h += sl.map(c => { const r = itemsFor(c); const nx = candidates(c).slice(0, 15); return `<div class="banner mt"><div class="row2"><div><span class="chip p1">${esc(coSt(c))}</span><h2 style="margin:6px 0 2px">${esc(c.name)} is top priority</h2><div class="muted">${esc(c.role)} · ${pct(r)}% ready · process usually the next day</div></div><span class="sp"></span><button class="pri" data-mock="${c.id}">Mock me now</button><button data-go="co:${c.id}">Company page</button></div>
-    <h3 class="mt">Your 6-hour shortlist block</h3><p class="note" style="margin:0">Do the parts in any order; tick items below as you go.</p><ol class="tight"><li><b>Hour 1 · The company:</b> JD, industry & AI brief, "why ${esc(c.name)}" in 3 lines with CV proofs, 2 questions to ask.</li><li><b>Hours 2–3 · Your CV:</b> every pointer they will probe, story, numbers and terms, out loud.</li><li><b>Hours 3–4 · Cases & guesstimates:</b> the company kit, timed, one of each type at least.</li><li><b>Hour 5 · Role knowledge:</b> the study modules this role needs.</li><li><b>Hour 6 · Two mocks:</b> a CV grill and a case or guesstimate, then fix the weak answer.</li><li>Then sleep. Rested beats one more framework.</li></ol>
+    <h3 class="mt">Your 6-hour shortlist block</h3><p class="note" style="margin:0">Work down this path in any order you like; then two mocks, then sleep.</p>${pathHtml(c)}
     <h3 class="mt">Do these first</h3>${nx.map(nxRow).join('') || '<p class="muted">Everything for this company is ticked. Do a mock.</p>'}</div>` }).join('');
   }
   h += `<div class="g2 mt"><div class="panel"><h2>Readiness by company</h2><div class="muted">Ranked by your priority × what the company is worth to you. Pink = P1. Tap Shortlist when one lands.</div><div class="board mt">` +
@@ -396,7 +398,7 @@ function renderToday() {
   v.innerHTML = h
 }
 function roleBars() {
-  return ROLEGROUPS.map(g => { const ts = TOPICS.filter(t => g.mods.includes(t.mod)); const ps = ts.map(tProg); const p = Math.round(ps.reduce((a, b) => a + b, 0) / Math.max(1, ps.length) * 100); return `<div class="vbar mt" style="grid-template-columns:minmax(0,10em) minmax(0,1fr) 3em"><span style="font-size:14px">${esc(g.n)}</span><div class="track"><div class="fill ok" style="width:${p}%"></div></div><div class="pct">${p}%</div></div>` }).join('')
+  return ROLEGROUPS.map(g => { const ts = TOPICS.filter(t => g.mods.includes(t.mod) && (!t.co || liveCos().some(c => t.co.includes(c.id)))); const [d, n] = sumT(ts); const p = Math.round(d / Math.max(1, n) * 100); return `<div class="vbar mt" style="grid-template-columns:minmax(0,10em) minmax(0,1fr) 3em"><span style="font-size:14px">${esc(g.n)}</span><div class="track"><div class="fill ok" style="width:${p}%"></div></div><div class="pct">${p}%</div></div>` }).join('')
 }
 
 /* ---------- Study ---------- */
@@ -405,7 +407,7 @@ function renderStudy() {
   const mods = MODS; const m = modById(curMod) || MODS[0];
   const users = liveCos().filter(c => c.mods.includes(m.id)).map(c => c.name);
   let h = `<div class="row2"><h2 style="margin:0">Study</h2><span class="sp"></span><label class="muted" for="studyFor">Show for</label><select id="studyFor"><option value="all">All companies</option>${liveCos().map(c => `<option value="${c.id}"${c.id === f ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>
-  <div class="pills mt">${mods.map(md => { const ts = TOPICS.filter(t => t.mod === md.id && (!fc || topicsFor(fc).includes(t))); const d = ts.reduce((a, t) => a + tProg(t), 0); const rel = !fc || fc.mods.includes(md.id); return `<button class="sm${md.id === m.id ? ' on' : ''}" data-mod="${md.id}" style="${rel ? '' : 'opacity:.45'}">${esc(md.n)} · ${Math.round(d)}/${ts.length}</button>` }).join('')}</div>
+  <div class="pills mt">${mods.map(md => { const ts = TOPICS.filter(t => t.mod === md.id && (!fc || topicsFor(fc).includes(t))); const [d, n] = sumT(ts); const rel = !fc || fc.mods.includes(md.id); return `<button class="sm${md.id === m.id ? ' on' : ''}" data-mod="${md.id}" style="${rel ? '' : 'opacity:.45'}">${esc(md.n)} · ${d}/${n}</button>` }).join('')}</div>
   <div class="panel mt"><h2>${esc(m.n)}</h2><p class="muted" style="margin-top:0">${esc(m.d)}${users.length ? ' For: ' + esc(users.join(', ')) + '.' : ''}</p>`;
   const ts = TOPICS.filter(t => t.mod === m.id && (!fc || topicsFor(fc).includes(t)));
   h += ts.map(t => {
@@ -420,7 +422,7 @@ function renderStudy() {
 }
 function bankRow(b) {
   const cos = (b.co || []).map(id => coById(id)).filter(Boolean).map(c => c.name.split(' ')[0]);
-  return `<details class="hist" style="padding:8px 0"><summary style="color:var(--ink)"><span class="row2" style="display:inline-flex;gap:8px"><input type="checkbox" data-ck="b:${b.id}"${ck('b:' + b.id) ? ' checked' : ''} aria-label="Practised" onclick="event.stopPropagation()"><span class="chip">${esc(b.cat)}</span>${b.src === 'cv' ? '<span class="chip warn">From your CV</span>' : ''}${cos.length ? `<span class="chip">${esc(cos.join(', '))}</span>` : ''}</span><div style="margin:6px 0 0 28px">${esc(b.q)}</div></summary><div class="body" style="margin-left:28px">${b.how}</div></details>`
+  return `<details class="hist" style="padding:8px 0"><summary style="color:var(--ink)"><span class="row2" style="display:inline-flex;gap:8px"><input type="checkbox" data-ck="b:${b.id}"${ck('b:' + b.id) ? ' checked' : ''} aria-label="Practised" onclick="event.stopPropagation()"><span class="chip">${esc(b.cat)}</span>${b.ind ? `<span class="chip">${esc(b.ind)}</span>` : ''}${b.src === 'cv' ? '<span class="chip warn">From your CV</span>' : b.src ? `<span class="chip">${esc(b.src)}</span>` : ''}${cos.length ? `<span class="chip">${esc(cos.join(', '))}</span>` : ''}</span><div style="margin:6px 0 0 28px">${esc(b.q)}</div></summary><div class="body" style="margin-left:28px">${b.how}</div></details>`
 }
 function hrBank() {
   const ans = (P.cv && P.cv.hr) || {};
@@ -444,6 +446,7 @@ function coDetail(c) {
 <div class="row2"><button class="sl${s ? ' on' : ''}" data-sl="${c.id}">${s ? '✓ Shortlisted' : 'Shortlist'}</button><select data-st="${c.id}" aria-label="Status">${STATUS.map(x => `<option${x === coSt(c) ? ' selected' : ''}>${x}</option>`).join('')}</select><select data-pr="${c.id}" aria-label="Priority">${['P1', 'P2', 'P3', 'Skip'].map(x => `<option${x === coPr(c) ? ' selected' : ''}>${x}</option>`).join('')}</select></div></div>
 <div class="kv mt">${c.ctc ? `<div><span>Total CTC</span><b>${L(c.ctc)}</b></div>` : ''}${c.fixed ? `<div><span>Fixed</span><b>${L(c.fixed)}</b></div>` : ''}<div><span>Worth to you</span><b>${L(val(c))}</b></div><div><span>Ready</span><b>${p}%</b></div></div>
 <p class="note">${esc(c.pay || '')}${c.loc ? ' · ' + esc(c.loc) : ''}</p><div class="row2"><button class="pri" data-mock="${c.id}">Mock me for ${esc(c.name.split(' ')[0])}</button></div></div>
+<div class="panel mt"><h3>Your prep path for ${esc(c.name)}</h3><p class="note" style="margin:0">The order you prepare in. Each step's progress counts towards this company's readiness.</p>${pathHtml(c)}</div>
 <div class="g2 mt"><div class="panel"><h3>What the JD asks for</h3><ul class="tight">${(c.jd || []).map(x => `<li>${esc(x)}</li>`).join('') || '<li class="muted">No JD saved.</li>'}</ul>
 ${c.expect && c.expect.length ? `<h3 class="mt2">What to expect</h3><p class="note" style="margin:0">From the role type; confirm the real format with seniors.</p><ul class="tight">${c.expect.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
 ${ind.length ? `<h3 class="mt2">Industry & company brief</h3>${ind.map(t => `<div class="chk"><span class="chip${tProg(t) >= 1 ? ' ok' : ''}">${tProg(t) >= 1 ? 'Done' : 'To do'}</span><label>${esc(t.t)}</label><button class="go" data-go="study:ind#${esc(t.id)}">Open</button></div>`).join('')}` : ''}
@@ -452,6 +455,29 @@ ${ind.length ? `<h3 class="mt2">Industry & company brief</h3>${ind.map(t => `<di
 <h3 class="mt2">CV pointers they will probe</h3>${cv.map(id => { const q = CVP().find(x => x.id === id); const n = Math.round(cvProg(q) * 3); return `<div class="chk"><span class="chip${n === 3 ? ' ok' : ''}">${n}/3</span><label>${esc(q.t)}</label><button class="go" data-go="cv#${esc(id)}">Open</button></div>` }).join('') || '<p class="muted">Upload your resume in Me to map pointers.</p>'}
 <h3 class="mt2">Study modules</h3><div class="pills">${c.mods.map(m => { const M = modById(m); if (!M) return ''; const ts = topicsFor(c).filter(t => t.mod === m); const d = ts.reduce((a, t) => a + tProg(t), 0); return `<button class="sm" data-go="study:${m}">${esc(M.n)} · ${Math.round(d)}/${ts.length}</button>` }).join('')}</div>
 ${c.ask && c.ask.length ? `<h3 class="mt2">Questions to ask them</h3><ul class="tight">${c.ask.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}</div></div>`
+}
+
+/* ---------- the per-company prep path, in the order you prepare ---------- */
+function prepPath(c) {
+  const T = k => topicById('t:' + k); const ind = TOPICS.filter(t => t.mod === 'ind' && t.co && t.co.includes(c.id));
+  const brief = ind.filter(t => !/-(ai|vc|lead|gtm)$/.test(t.k)); const pick = suf => ind.filter(t => t.k.endsWith('-' + suf));
+  const cv = cvFor(c);
+  const steps = [
+    { l: 'Your TMAY and story', ts: [T('story:tmay'), T('story:arc')].filter(Boolean), go: 'study:story' },
+    { l: 'CV pointers they will probe', cv, go: 'cv' },
+    { l: 'The company: business, goals, vision', ts: brief, go: 'study:ind', note: brief.length ? '' : 'Read its website, annual report and latest news; note segments, goals and vision.' },
+    { l: 'AI at the company and in its industry', ts: pick('ai'), go: 'study:ind', note: pick('ai').length ? '' : 'Search the company + "AI"; note 2 uses and 1 risk.' },
+    { l: 'General AI knowledge', ts: TOPICS.filter(t => t.mod === 'ai'), go: 'study:ai' },
+    { l: 'Behavioural questions', ts: [T('story:hrbank'), T('story:sw'), T('story:mktcon')].filter(Boolean), go: 'study:story' },
+    { l: 'Leadership, vision and campaigns', ts: pick('lead'), go: 'study:ind', note: pick('lead').length ? '' : 'Find one recent leadership interview and their best-known campaigns.' },
+    { l: 'Industry value chain', ts: pick('vc'), go: 'study:ind', note: pick('vc').length ? '' : 'Draw the value chain from supplier to customer and where money is made.' },
+    { l: 'Cases, GTM and guesstimates', ts: pick('gtm').concat(TOPICS.filter(t => (t.mod === 'case' || t.mod === 'guess') && t.co && t.co.includes(c.id))), go: 'study:ind' },
+    { l: 'Why this company, why this role', why: 1, go: 'co:' + c.id }];
+  return steps.map(s => { let d = 0, n = 0; if (s.ts) { const r = sumT(s.ts); d += r[0]; n += r[1] } if (s.cv) { s.cv.forEach(id => { const p = CVP().find(q => q.id === id); if (p) { d += cvProg(p); n += 1 } }) } if (s.why) { n = 1; d = ck('co:' + c.id + ':why') ? 1 : 0 } return { ...s, d, n } })
+}
+function pathHtml(c) {
+  return `<div class="mt">${prepPath(c).map((s, i) => { const p = s.n ? Math.round(s.d / s.n * 100) : 0; const first = s.ts && s.ts.find(t => tProg(t) < 1); const g = first ? s.go + '#' + first.id : s.go;
+    return `<div class="vbar mt" style="grid-template-columns:1.6em minmax(0,1fr) 5.5em auto"><b class="muted">${i + 1}</b><div><div style="font-size:15px">${esc(s.l)}</div>${s.n ? `<div class="track" style="height:8px;margin-top:4px"><div class="fill${p >= 100 ? ' ok' : ''}" style="width:${p}%"></div></div>` : `<div class="note">${esc(s.note || '')}</div>`}</div><div class="pct" style="font-size:13px">${s.n ? (Math.round(s.d * 10) / 10) + '/' + s.n : ''}</div><button class="go sm ghost" data-go="${esc(g)}">Open</button></div>` }).join('')}</div>`
 }
 function setStatus(id, st) { S.co[id] = Object.assign(S.co[id] || {}, { st, in: 1, t: Date.now() }); save(); renderAll(); if (st === 'Shortlisted') toast(coById(id).name + ' is now top priority') }
 

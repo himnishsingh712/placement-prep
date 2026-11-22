@@ -1,4 +1,5 @@
 import { MODS2 } from './content2.js';
+import { BANK2, AI, MKT2, IND2, CASE2, GUESS2 } from './content3.js';
 
 export const CATLAB = { brand: 'Brand / marketing', mt: 'Rotational MT', digital: 'Digital / performance', growth: 'Growth', product: 'Product / product marketing', category: 'Category', consult: 'Consulting', cs: 'Customer success', b2b: 'B2B / key accounts', field: 'Field sales', media: 'Media / agency', research: 'Research', finance: 'BFSI sales', gm: 'Business / ops' };
 export const CAT2MODS = { brand: ['story', 'mkt', 'digital', 'case'], mt: ['story', 'mkt', 'sales', 'guess'], consult: ['story', 'guess', 'case', 'tech'], product: ['story', 'b2b', 'mkt', 'digital'], growth: ['story', 'digital', 'mkt', 'saas', 'guess'], category: ['story', 'mkt', 'sales', 'case'], digital: ['story', 'digital', 'mkt'], cs: ['story', 'saas', 'digital'], gm: ['story', 'case', 'sales', 'guess'], b2b: ['story', 'b2b', 'sales'], field: ['story', 'sales', 'mkt'], finance: ['story', 'sales', 'case'], research: ['story', 'mkt', 'guess'], media: ['story', 'mkt', 'digital'] };
@@ -8,7 +9,8 @@ export const ROLEGROUPS = [
   { n: 'Brand & marketing', mods: ['mkt', 'sales'] },
   { n: 'Digital & growth', mods: ['digital', 'saas'] },
   { n: 'B2B & product marketing', mods: ['b2b'] },
-  { n: 'Industry & AI trends', mods: ['ind'] }];
+  { n: 'AI knowledge', mods: ['ai'] },
+  { n: 'Company & industry deep dives', mods: ['ind'] }];
 
 /* Shared company list (same for everyone in the batch). Personal status and priority live in each person's state. */
 export const COMPANIES = [
@@ -132,4 +134,10 @@ export const BANK = [
   { id: 'c20', kind: 'case', cat: 'Tech transformation', q: 'A manufacturer\'s month-end close takes 12 days. Cut it to 5.', co: ['atci'], how: `<p>Map R2R: sub-ledger close → journals → reconciliations → intercompany → consolidation → reporting. Bottlenecks: manual reconciliations, late intercompany, spreadsheet consolidation. Fixes: continuous accounting, auto-reconciliation, intercompany rules, close calendar and checklist tool, cloud ERP consolidation, AI for variance commentary. Roadmap with quick wins (day 12 → 8) then system changes (→ 5).</p>` },
   { id: 'c21', kind: 'case', cat: 'AI use case', q: 'A client asks: "Where should we use GenAI first?"', co: ['atci', 'ibm'], how: `<p>List candidate use cases; score on value (time/cost saved, revenue) × feasibility (data, risk, integration). Pick 2–3 low-risk, high-volume ones (service desk, document processing, sales content). Pilot with clear metrics, guardrails and human review; then scale. Governance: data privacy, accuracy checks, audit trail.</p>` }];
 
-export const MODS = [STORY, GUESS, CASE, ...MODS2];
+CASE.tp.push(...CASE2); GUESS.tp.push(...GUESS2);
+const byId = id => MODS2.find(m => m.id === id);
+byId('mkt').tp.push(...MKT2); byId('ind').tp.push(...IND2);
+BANK.push(...BANK2);
+COMPANIES.forEach(c => { if (!c.mods.includes('ai')) c.mods.push('ai'); if (!c.mods.includes('ind')) c.mods.push('ind'); if (['google', 'atci', 'titan', 'versuni', 'schneider'].includes(c.id) && !c.mods.includes('case')) c.mods.push('case') });
+Object.values(CAT2MODS).forEach(m => { if (!m.includes('ai')) m.push('ai') });
+export const MODS = [STORY, GUESS, CASE, AI, ...MODS2];
