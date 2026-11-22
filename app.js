@@ -22,7 +22,7 @@ let USER = null, P = null, S = { c: {}, n: {}, co: {}, h: [] }, CO = [];
 let saveT = null;
 function save() { clearTimeout(saveT); saveT = setTimeout(flush, 800) }
 async function flush() { if (!USER) return; const { error } = await sb.from('pp_state').upsert({ user_id: USER.id, state: S, updated_at: new Date().toISOString() }); if (error) toast('Not saved: check your connection') }
-async function saveProfile(patch) { Object.assign(P, patch); const { error } = await sb.from('pp_profiles').upsert({ id: USER.id, ...patch, updated_at: new Date().toISOString() }); if (error) { console.error(error); toast('Could not save profile') } }
+async function saveProfile(patch) { Object.assign(P, patch); if (patch.cv) syncPersonal(); const { error } = await sb.from('pp_profiles').upsert({ id: USER.id, ...patch, updated_at: new Date().toISOString() }); if (error) { console.error(error); toast('Could not save profile') } }
 
 /* ---------- topics + items ---------- */
 const TOPICS = []; MODS.forEach(m => m.tp.forEach((t, i) => TOPICS.push({ ...t, mod: m.id, id: 't:' + m.id + ':' + (t.k || i), i })));
@@ -182,6 +182,66 @@ async function ai(task, payload) {
   const j = await r.json().catch(() => ({})); if (!r.ok) { const e = new Error(j.error || 'AI unavailable'); e.code = j.code || r.status; throw e } return j
 }
 
+
+/* ---------- personal CV practice (per user) ---------- */
+const PERS_SETS = { cvcase: 'case', setH: 'guess', setC: 'guess' };
+let _origSubs = null;
+function cvTemplates() {
+  const ps = CVP().filter(p => /\d/.test(p.t)).slice(0, 10); const out = [];
+  ps.forEach((p, i) => {
+    const line = p.t.length > 140 ? p.t.slice(0, 140).replace(/\s+\S*$/, '') + '…' : p.t;
+    out.push({ id: 'u_tc' + i, kind: 'case', cat: 'From your CV', src: 'cv', co: [], q: `Your CV says: "${line}". Do the same for us: how would you run this for our company?`, how: `<p><b>How to answer:</b> restate the goal in one line, then: (1) what you did and the result, with the number explained; (2) how our situation differs (customers, scale, channels); (3) your plan in three steps; (4) the metric you'd track and a 90-day target.</p><p><b>Prepare:</b> know where every number on this line came from, and one thing you'd do differently now.</p>` });
+    if (i < 6) out.push({ id: 'u_tg' + i, kind: 'guess', cat: 'From your CV', src: 'cv', co: [], q: `From "${line}": estimate the size of the market or volume behind this work (customers, users or spend in India per year).`, how: `<p>Pick the unit (people, businesses, transactions, rupees). Go top-down: population or businesses → the relevant segment → who buys or uses → how often → price. Then check bottom-up from something you saw on the job (one client, one store, one campaign × how many exist). Say the answer, then one line on what it means for the company asking.</p>` });
+  });
+  return out;
+}
+function syncPersonal() {
+  const allT = MODS.flatMap(m => m.tp);
+  if (!_origSubs) { _origSubs = {}; allT.forEach(t => { if (PERS_SETS[t.k]) _origSubs[t.k] = [...(t.sub || [])] }) }
+  for (let i = BANK.length - 1; i >= 0; i--) if (BANK[i].mine) BANK.splice(i, 1);
+  const own = ((P.cv && P.cv.bank) || []).map((b, i) => ({ src: 'cv', co: [], cat: 'From your CV', ...b, id: 'u_' + (b.id || i), mine: true })).filter(b => b.q && b.how && (b.kind === 'case' || b.kind === 'guess'));
+  const hasOwnCV = P.preset === 'himnish' || own.length;
+  const list = own.length ? own : (hasOwnCV ? [] : cvTemplates().map(b => ({ ...b, mine: true })));
+  BANK.push(...list);
+  allT.forEach(t => { if (!PERS_SETS[t.k]) return; const kind = PERS_SETS[t.k]; const nx = [..._origSubs[t.k], ...(t.k === 'setC' ? [] : list.filter(b => b.kind === kind).map(b => b.id))]; t.sub.length = 0; t.sub.push(...nx) });
+}
+
+
+function importPrompt() {
+  const cos = liveCos().map(c => `${c.id} = ${c.name}${c.role ? ' (' + c.role + ')' : ''}`).join('; ');
+  const hr = HRQ.map(q => `${q[0]} = "${q[1]}"`).join('; ');
+  return `I'm preparing for MBA placement interviews (MICA, PGP). Using my attached resume (and any CV critique notes I paste), build my interview prep. Be specific to my real experience; don't invent numbers, and where something is unclear, write [CHECK] instead of guessing.
+
+Reply with ONLY one JSON object (no other text) in exactly this shape:
+{
+ "pointers": [ { "id": "P1", "s": "Company · role (dates)", "t": "the CV line", "k": "key terms to know for this line",
+   "q": ["5 likely interviewer questions on this line"],
+   "defend": "one or two lines on how to explain the number or my role honestly",
+   "star": [["Situation","..."],["Task","..."],["Action","..."],["Result","..."]] } ],
+ "map": { "companyId": ["P1","P3"] },
+ "hr": { "questionId": "my answer, natural and spoken, 60–90 seconds, first person" },
+ "bank": [ { "id": "c1", "kind": "case", "cat": "From your CV", "co": ["companyId"], "q": "a case an interviewer could build from my CV", "how": "<p>how to solve it, step by step, with numbers</p>" },
+           { "id": "g1", "kind": "guess", "cat": "From your CV", "co": [], "q": "a guesstimate from my CV, skills or hobbies", "how": "<p>worked answer, top-down or bottom-up, with a cross-check</p>" } ]
+}
+
+Rules: one pointer per CV line that an interviewer could ask about (all of them). STAR for every pointer, written as I'd say it aloud, not as a fairy tale and not robotic. 6–8 cases and 6–8 guesstimates in "bank" (mix of top-down and bottom-up). The "how" fields may use simple HTML (<p>, <ul>, <li>, <b>).
+Company ids for "map" and "co": ${cos || 'none yet'}.
+HR question ids: ${hr}.`;
+}
+function parseImport(txt) {
+  const a = txt.indexOf('{'), b = txt.lastIndexOf('}'); if (a < 0 || b < a) return { err: 'I could not find the JSON. Paste Claude\'s whole reply.' };
+  let d; try { d = JSON.parse(txt.slice(a, b + 1)) } catch (e) { return { err: 'The reply is not valid JSON. Ask Claude: "Return only the JSON, nothing else", then paste again.' } }
+  const clean = h => String(h || '').replace(/<\s*(script|iframe|style|object|embed)[\s\S]*?>[\s\S]*?(<\s*\/\s*\1\s*>|$)/gi, '').replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '').replace(/javascript:/gi, '');
+  const str = x => typeof x === 'string' ? x : '';
+  const cv = {};
+  if (Array.isArray(d.pointers) && d.pointers.length) cv.pointers = d.pointers.filter(p => p && str(p.t)).slice(0, 80).map((p, i) => ({ id: str(p.id) || 'P' + (i + 1), s: str(p.s) || 'Resume', t: str(p.t), k: str(p.k), q: Array.isArray(p.q) ? p.q.map(str).filter(Boolean).slice(0, 8) : [], defend: str(p.defend), star: Array.isArray(p.star) ? p.star.filter(x => Array.isArray(x) && x.length === 2).map(x => [str(x[0]), str(x[1])]) : undefined }));
+  if (d.map && typeof d.map === 'object') { cv.map = {}; Object.entries(d.map).forEach(([k, v]) => { if (Array.isArray(v)) cv.map[k] = v.map(str).filter(Boolean) }) }
+  if (d.hr && typeof d.hr === 'object') { cv.hr = { ...((P.cv && P.cv.hr) || {}) }; Object.entries(d.hr).forEach(([k, v]) => { if (str(v)) cv.hr[k] = '<p>' + esc(str(v)).replace(/\n\n+/g, '</p><p>').replace(/\n/g, '<br>') + '</p>' }) }
+  if (Array.isArray(d.bank)) cv.bank = d.bank.filter(x => x && (x.kind === 'case' || x.kind === 'guess') && str(x.q) && str(x.how)).slice(0, 30).map((x, i) => ({ id: str(x.id) || 'b' + i, kind: x.kind, cat: str(x.cat) || 'From your CV', co: Array.isArray(x.co) ? x.co.map(str) : [], q: str(x.q), how: clean(x.how) }));
+  if (!cv.pointers && !cv.hr && !cv.bank) return { err: 'Nothing to import: the JSON has no pointers, hr or bank.' };
+  return { cv };
+}
+
 /* ---------- boot ---------- */
 let RECOVERY = /type=recovery/.test(location.hash);
 async function boot() {
@@ -204,7 +264,7 @@ async function loadAll() {
   const code = Object.fromEntries(COMPANIES.map(c => [c.id, c]));
   CO = Object.values(shared).map(c => { const k = code[c.id]; const m = k ? { ...k, ...c, mods: [...new Set([...(k.mods || []), ...(c.mods || [])])] } : c; return { mods: ['story'], jd: [], expect: [], ask: [], kw: [], ...m } });
   CO.sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
-  MODEL = null;
+  MODEL = null; syncPersonal();
   $('#boot').hidden = true; $('#auth').hidden = true;
   if (!P.onboarded) return showOnboarding();
   $('#onb').hidden = true; $('#app').hidden = false; if (!S.plan0) { S.plan0 = P.preset === 'himnish' ? '2026-11-22' : todayIST(); save() }
@@ -277,7 +337,7 @@ function obRender() {
   }
   if (s === 1) {
     o.innerHTML = head(2, 'Your resume', 'One resume per account. The app reads it once and turns every line into a CV-board pointer with the questions you are likely to get.') + `<div class="panel mt"><label class="f" for="obf">Resume (PDF or .docx)</label><input id="obf" type="file" accept=".pdf,.docx">
-    <p class="note" id="obfM"></p><div id="obfOut"></div><div class="row2 mt"><button class="ghost" id="obBack">Back</button><span class="sp"></span><button class="pri" id="obNext" ${P.cv && P.cv.pointers ? '' : 'disabled'}>Next</button></div></div></div>`;
+    <p class="note">Tip: later, in Me, you can build full STAR stories, HR answers and CV-based cases with your own Claude account, for free.</p><p class="note" id="obfM"></p><div id="obfOut"></div><div class="row2 mt"><button class="ghost" id="obBack">Back</button><span class="sp"></span><button class="pri" id="obNext" ${P.cv && P.cv.pointers ? '' : 'disabled'}>Next</button></div></div></div>`;
     if (P.cv && P.cv.pointers) $('#obfOut').innerHTML = cvPreview();
     $('#obBack').onclick = () => { OB.step = 0; obRender() }; $('#obNext').onclick = () => { OB.step = 2; obRender() };
     $('#obf').onchange = async e => {
@@ -688,9 +748,14 @@ function renderMe() {
   ${pf.floor ? `<h3 class="mt2">Your EOI rules</h3><p class="muted" style="margin-top:0">Floor ${L(pf.floor)} fixed · brand weight ${pf.brand}/4 · 6-day week: ${esc(pf.six)}${pf.goal ? ' · Goal: ' + esc(pf.goal) : ''}</p>` : ''}
   <p class="muted">Your model has learned from ${(P.eoi_rows || []).length} answers.</p>
   <div class="row2 mt"><button id="meOut" class="ghost">Sign out</button></div></div>
+  <div class="panel"><h3>Build your CV prep with your own Claude</h3><p class="muted" style="margin-top:0">Free with your own Claude account. Copy this prompt into a new Claude chat, attach your resume (and paste any CV critique notes), then paste Claude's reply below. It fills your CV board (STAR stories, likely questions, how to defend each number), your HR answers, and cases and guesstimates built from your CV.</p>
+  <div class="row2"><button id="cpP">Copy prompt</button><span class="note" id="cpM"></span></div>
+  <textarea id="impT" rows="5" placeholder="Paste Claude's reply here (it starts with {)" style="width:100%;margin-top:8px"></textarea><div class="row2 mt"><button class="pri" id="impGo">Import</button><span class="note" id="impM"></span></div></div>
   <div class="panel"><h3>Install on your phone</h3><ul class="tight"><li><b>iPhone:</b> open this site in Safari → Share → Add to Home Screen.</li><li><b>Android:</b> open in Chrome → ⋮ → Install app (or Add to Home screen).</li></ul>
   <h3 class="mt2">AI use today</h3><p class="muted" id="meAI">…</p><p class="note">AI is used only for mock-interview questions and scoring, and for reading a resume. The EOI verdict runs on your phone for free.</p></div></div>`;
   $('#meOut').onclick = async () => { await flush(); await sb.auth.signOut() };
+  $('#cpP').onclick = async () => { const t = importPrompt(); try { await navigator.clipboard.writeText(t); $('#cpM').textContent = 'Copied. Paste it into a new Claude chat.' } catch (e) { $('#impT').value = t; $('#impT').select(); $('#cpM').textContent = 'Copy the text in the box below, then clear it.' } };
+  $('#impGo').onclick = async () => { const r = parseImport($('#impT').value); if (r.err) { $('#impM').textContent = r.err; return } const cv = { ...(P.cv || {}), ...r.cv }; await saveProfile({ cv }); $('#impM').textContent = `Imported: ${(cv.pointers || []).length} pointers, ${Object.keys(cv.hr || {}).length} HR answers, ${(cv.bank || []).length} cases and guesstimates.`; renderAll(); toast(`Imported ${(cv.pointers || []).length} pointers, ${Object.keys(cv.hr || {}).length} HR answers, ${(cv.bank || []).length} cases and guesstimates.`) };
   $('#meCV').onchange = async e => { const f = e.target.files[0]; if (!f) return; $('#meCVm').textContent = 'Reading…'; try { const txt = await readFile(f); $('#meCVm').textContent = 'Rebuilding your board…'; let cv; try { cv = (await ai('parse_resume', { text: txt.slice(0, 14000) })).cv } catch (er) { cv = naiveParse(txt) } if (P.cv && P.cv.hr) cv.hr = P.cv.hr; await saveProfile({ resume_text: txt.slice(0, 20000), cv }); $('#meCVm').textContent = 'Done.'; renderAll() } catch (er) { $('#meCVm').textContent = er.message } };
   sb.from('pp_ai_usage').select('n').eq('day', todayIST()).maybeSingle().then(({ data }) => { const el = $('#meAI'); if (el) el.textContent = `${data ? data.n : 0} of 40 AI calls used today.` })
 }

@@ -1,5 +1,5 @@
 // Network first, cache as fallback, so the app opens even on a weak connection.
-const C = 'prep-v3';
+const C = 'prep-v4';
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
 self.addEventListener('fetch', e => {
