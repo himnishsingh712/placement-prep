@@ -333,7 +333,7 @@ function obRender() {
     <details class="mt"><summary>Have a setup code from Claude?</summary><p class="note">If your profile was prepared in advance, enter the code to load it and skip the setup.</p><div class="row2"><input id="obc" type="text" style="max-width:220px" autocapitalize="characters"><button id="obcGo">Use code</button></div><p class="note" id="obcM"></p></details>
     <div class="row2 mt"><span class="sp"></span><button class="pri" id="obNext">Next</button></div></div></div>`;
     $('#obNext').onclick = async () => { const n = $('#obn').value.trim(); if (!n) return; await saveProfile({ name: n }); OB.step = 1; obRender() };
-    $('#obcGo').onclick = async () => { const code = $('#obc').value.trim(); if (!code) return; $('#obcM').textContent = 'Checking…'; const { data, error } = await sb.rpc('pp_claim_preset', { p_code: code }); if (error || !data) { $('#obcM').textContent = 'That code did not work.'; return } $('#obcM').textContent = 'Loaded.'; await loadAll() };
+    $('#obcGo').onclick = async () => { const code = $('#obc').value.trim(); if (!code) return; $('#obcM').textContent = 'Checking…'; const { data, error } = await sb.rpc('pp_claim_preset', { p_code: code }); if (error || !data) { $('#obcM').textContent = 'That code did not work.'; return } $('#obcM').textContent = 'Loaded. Opening…'; setTimeout(() => location.reload(), 400) };
     return
   }
   if (s === 1) {
