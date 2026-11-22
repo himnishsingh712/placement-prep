@@ -122,3 +122,5 @@ svg text{font-family:"Hanken Grotesk",system-ui,sans-serif}
 @media(max-width:600px){.board .row{grid-template-columns:minmax(0,1fr) 3em auto;row-gap:4px}.board .row .track{grid-column:1/-1;grid-row:2}.cvp{grid-template-columns:minmax(0,1fr)}table{font-size:13px}th,td{padding:6px 5px}.vbar{grid-template-columns:minmax(0,7em) minmax(0,1fr) 4em}.panel{padding:14px}}
 @media(prefers-reduced-motion:reduce){.fill{transition:none}}
 .wt-i{margin:8px 0 2px;color:var(--mut,#9fb0c8)}.wt-y{margin:2px 0 8px}
+details.tp>summary .chev{flex:none;color:var(--sky);transition:transform .2s;margin-left:6px}
+details.tp[open]>summary .chev{transform:rotate(180deg)}

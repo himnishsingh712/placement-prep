@@ -93,12 +93,12 @@ function priorFromPrefs(pf) {
   const m = M0.slice(); m[0] = 1.8 * (18 - pf.floor); const br = pf.brand || 2; m[2] = .25 + .25 * br; m[3] = .15 * br;
   const cv = { love: .6, ok: 0, meh: -.8, never: -4 }; const cp = pf.cities || {};
   m[4] = cv[cp.ncr || 'ok']; m[5] = cv[cp.mum || 'ok']; m[6] = cv[cp.blr || 'ok']; m[7] = cv[cp.oth || 'ok'] - .2; m[12] = cv[cp.kc || 'meh'] - 1;
-  m[10] = pf.six === 'never' ? -4 : pf.six === 'fine' ? -.2 : -1.2; m[8] = (pf.avoid || []).some(r => ['field', 'b2b', 'finance'].includes(r)) ? -1 : 0;
+  m[10] = pf.six === 'never' ? -4 : pf.six === 'fine' ? -.2 : -1.2; m[8] = (pf.avoid || []).some(r => ['field', 'b2b', 'finance'].includes(r)) ? (pf.rtier ? -.5 : -1) : 0;
   return m
 }
 let MODEL = null;
 function model() { if (MODEL) return MODEL; const rows = (P.eoi_rows || []).map(r => [r[0], r[1], r[2]]); MODEL = fit(rows, priorFromPrefs(P.prefs)); return MODEL }
-function rolePref(cat) { const pf = P.prefs || {}; let o = 0; if ((pf.roles || []).includes(cat)) o += .5; if ((pf.avoid || []).includes(cat)) o -= 1.5; return o }
+function rolePref(cat) { const pf = P.prefs || {}; if (pf.rtier && pf.rtier[cat]) return pf.rtier[cat] === 'T1' ? .5 : pf.rtier[cat] === 'T3' ? -.6 : 0; let o = 0; if ((pf.roles || []).includes(cat)) o += .5; if ((pf.avoid || []).includes(cat)) o -= 1.5; return o }
 function val(c) { const b = model(); const x = fx({ company: c.name, tier: c.tier, fixed: c.fixed || (c.ctc || 18) * .85, city: c.city || 'Gurgaon', cat: c.rt }); const z = x.reduce((s, v, k) => s + v * b[k], 0) + rolePref(c.rt); return 18 + z / Math.max(.6, b[1]) }
 const band = v => v >= 24 ? 'Super dream' : v >= 20 ? 'Dream' : v >= 18 ? 'Good' : v >= 16 ? 'Below floor' : 'Weak';
 
@@ -114,6 +114,7 @@ async function readFile(file) {
     pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs';
     const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise; let out = '';
     for (let i = 1; i <= Math.min(doc.numPages, 15); i++) { const pg = await doc.getPage(i); const tc = await pg.getTextContent(); out += tc.items.map(x => x.str + (x.hasEOL ? '\n' : ' ')).join('') + '\n' }
+    if (out.replace(/\s+/g, '').length < 150) throw new Error('This PDF is a scanned image, so the app can\'t read its text. Upload the Word (.docx) file instead, or in Word / Google Docs use File → Download → PDF and upload that.');
     return out
   }
   if (name.endsWith('.docx')) {
@@ -323,7 +324,7 @@ function showNewPassword() {
 
 /* ---------- onboarding ---------- */
 let OB = { step: 0 };
-function showOnboarding() { $('#app').hidden = true; const o = $('#onb'); o.hidden = false; obRender() }
+function showOnboarding() { if (!OB.edit && OB.step < 2 && P.preset && P.cv && P.cv.pointers && P.cv.pointers.length) OB.step = 2; $('#app').hidden = true; const o = $('#onb'); o.hidden = false; obRender() }
 function obRender() {
   const o = $('#onb'); const s = OB.step;
   const head = (n, t, d) => `<div style="max-width:640px;margin:0 auto;padding-top:calc(24px + env(safe-area-inset-top))"><div class="muted">Step ${n} of 5</div><h1>${t}</h1><p class="sub">${d}</p>`;
@@ -332,7 +333,7 @@ function obRender() {
     <details class="mt"><summary>Have a setup code from Claude?</summary><p class="note">If your profile was prepared in advance, enter the code to load it and skip the setup.</p><div class="row2"><input id="obc" type="text" style="max-width:220px" autocapitalize="characters"><button id="obcGo">Use code</button></div><p class="note" id="obcM"></p></details>
     <div class="row2 mt"><span class="sp"></span><button class="pri" id="obNext">Next</button></div></div></div>`;
     $('#obNext').onclick = async () => { const n = $('#obn').value.trim(); if (!n) return; await saveProfile({ name: n }); OB.step = 1; obRender() };
-    $('#obcGo').onclick = async () => { const code = $('#obc').value.trim(); if (!code) return; $('#obcM').textContent = 'Checking…'; const { data, error } = await sb.rpc('pp_claim_preset', { p_code: code }); if (error || !data) { $('#obcM').textContent = 'That code did not work.'; return } $('#obcM').textContent = 'Loaded. Opening your app…'; await loadAll() };
+    $('#obcGo').onclick = async () => { const code = $('#obc').value.trim(); if (!code) return; $('#obcM').textContent = 'Checking…'; const { data, error } = await sb.rpc('pp_claim_preset', { p_code: code }); if (error || !data) { $('#obcM').textContent = 'That code did not work.'; return } $('#obcM').textContent = 'Loaded.'; await loadAll() };
     return
   }
   if (s === 1) {
@@ -354,8 +355,8 @@ function obRender() {
     const multi = (id, sel) => `<div class="seg" data-multi="${id}">${cats.map(c => `<button class="sm${(sel || []).includes(c) ? ' on' : ''}" data-v="${c}">${esc(CATLAB[c])}</button>`).join('')}</div>`;
     const cityRow = (k, lab) => `<div class="row2" style="margin:6px 0"><b style="width:9em;font-weight:500">${lab}</b><div class="seg" data-one="city_${k}">${[['love', 'Love'], ['ok', 'Fine'], ['meh', 'Prefer not'], ['never', 'Never']].map(([v, l]) => `<button class="sm${((pf.cities || {})[k] || (k === 'kc' ? 'meh' : 'ok')) === v ? ' on' : ''}" data-v="${v}">${l}</button>`).join('')}</div></div>`;
     o.innerHTML = head(3, 'What you want', 'Quick answers. These set your starting EOI rules; the hard cards in step 5 fine-tune them.') + `<div class="panel mt">
-    <label class="f">Roles you want</label>${multi('roles', pf.roles)}
-    <label class="f">Roles you'd rather avoid</label>${multi('avoid', pf.avoid)}
+    <label class="f">Rank each role type</label><p class="note" style="margin-top:0">Tier 1: what you most want. Tier 2: happy to do. Tier 3: only if the pay or brand is great. Nothing is ruled out.</p>
+    ${cats.map(c => { const cur = (pf.rtier || {})[c] || ((pf.roles || []).includes(c) ? 'T1' : (pf.avoid || []).includes(c) ? 'T3' : 'T2'); return `<div class="row2" style="margin:6px 0;flex-wrap:nowrap"><span style="flex:1;font-size:14px">${esc(CATLAB[c])}</span><div class="seg" data-one="rt_${c}" style="flex:none">${['T1', 'T2', 'T3'].map(v => `<button class="sm${cur === v ? ' on' : ''}" data-v="${v}">${v.replace('T', 'Tier ')}</button>`).join('')}</div></div>` }).join('')}
     <label class="f">Lowest fixed pay you'd EOI for at a mid-tier company, in your best city: <b id="flv">${L(pf.floor || 17.5)}</b></label><input id="fl" type="range" min="13" max="24" step=".5" value="${pf.floor || 17.5}" style="width:100%;accent-color:var(--pink)">
     <label class="f">Cities</label>${cityRow('ncr', 'Delhi NCR')}${cityRow('mum', 'Mumbai')}${cityRow('blr', 'Bangalore')}${cityRow('oth', 'Pune / Hyderabad / others')}${cityRow('kc', 'Kolkata / Chennai')}
     <label class="f">How much does the brand name matter against pay?</label><div class="seg" data-one="brand">${[[1, 'Pay first'], [2, 'Balanced'], [3, 'Brand matters a lot'], [4, 'Brand first']].map(([v, l]) => `<button class="sm${(pf.brand || 2) === v ? ' on' : ''}" data-v="${v}">${l}</button>`).join('')}</div>
@@ -365,10 +366,10 @@ function obRender() {
     <div class="row2 mt"><button class="ghost" id="obBack">Back</button><span class="sp"></span><button class="pri" id="obNext">Next</button></div></div></div>`;
     const tmp = JSON.parse(JSON.stringify(pf)); tmp.cities = tmp.cities || {};
     o.querySelectorAll('[data-multi]').forEach(g => g.onclick = e => { const b = e.target.closest('button'); if (!b) return; const k = g.dataset.multi; tmp[k] = tmp[k] || []; const v = b.dataset.v; const i = tmp[k].indexOf(v); if (i >= 0) tmp[k].splice(i, 1); else { if (k === 'most' && tmp[k].length >= 2) return; tmp[k].push(v) } b.classList.toggle('on') });
-    o.querySelectorAll('[data-one]').forEach(g => g.onclick = e => { const b = e.target.closest('button'); if (!b) return; const k = g.dataset.one; g.querySelectorAll('button').forEach(x => x.classList.remove('on')); b.classList.add('on'); const v = isNaN(+b.dataset.v) ? b.dataset.v : +b.dataset.v; if (k.startsWith('city_')) tmp.cities[k.slice(5)] = v; else tmp[k] = v });
+    o.querySelectorAll('[data-one]').forEach(g => g.onclick = e => { const b = e.target.closest('button'); if (!b) return; const k = g.dataset.one; g.querySelectorAll('button').forEach(x => x.classList.remove('on')); b.classList.add('on'); const v = isNaN(+b.dataset.v) ? b.dataset.v : +b.dataset.v; if (k.startsWith('city_')) tmp.cities[k.slice(5)] = v; else if (k.startsWith('rt_')) { tmp.rtier = tmp.rtier || {}; tmp.rtier[k.slice(3)] = v } else tmp[k] = v });
     $('#fl').oninput = e => $('#flv').textContent = L(e.target.value);
-    $('#obBack').onclick = () => { OB.step = 1; obRender() };
-    $('#obNext').onclick = async () => { tmp.floor = +$('#fl').value; tmp.goal = $('#goal').value.trim(); ['ncr', 'mum', 'blr', 'oth'].forEach(k => tmp.cities[k] = tmp.cities[k] || 'ok'); tmp.cities.kc = tmp.cities.kc || 'meh'; tmp.brand = tmp.brand || 2; tmp.six = tmp.six || 'heavy'; await saveProfile({ prefs: tmp }); MODEL = null; OB.step = 3; obRender() };
+    $('#obBack').onclick = () => { if (OB.edit) { OB.edit = false; OB.step = 0; $('#onb').hidden = true; $('#app').hidden = false; return } OB.step = 1; obRender() };
+    $('#obNext').onclick = async () => { tmp.floor = +$('#fl').value; tmp.goal = $('#goal').value.trim(); ['ncr', 'mum', 'blr', 'oth'].forEach(k => tmp.cities[k] = tmp.cities[k] || 'ok'); tmp.cities.kc = tmp.cities.kc || 'meh'; tmp.rtier = tmp.rtier || {}; cats.forEach(c => { if (!tmp.rtier[c]) tmp.rtier[c] = (tmp.roles || []).includes(c) ? 'T1' : (tmp.avoid || []).includes(c) ? 'T3' : 'T2' }); tmp.roles = cats.filter(c => tmp.rtier[c] === 'T1'); tmp.avoid = cats.filter(c => tmp.rtier[c] === 'T3'); tmp.brand = tmp.brand || 2; tmp.six = tmp.six || 'heavy'; await saveProfile({ prefs: tmp }); MODEL = null; if (OB.edit) { OB.edit = false; OB.step = 0; $('#onb').hidden = true; $('#app').hidden = false; toast('Preferences saved'); location.hash = 'me'; renderAll(); return } OB.step = 3; obRender() };
     return
   }
   if (s === 3) {
@@ -415,30 +416,38 @@ function hardCard() {
 async function finishOnb() { $('#onb').innerHTML = '<div class="wrap" style="padding-top:30vh;text-align:center"><div class="muted">Calibrating to you…</div></div>'; await saveProfile({ eoi_rows: P.eoi_rows, onboarded: true }); MODEL = null; S.plan0 = todayIST(); await flush(); location.hash = 'today'; await loadAll() }
 
 /* ---------- router ---------- */
-const VIEWS = ['today', 'study', 'companies', 'cv', 'practice', 'season', 'me'];
+const VIEWS = ['today', 'study', 'cv', 'practice', 'more', 'companies', 'season', 'me'];
+const MORE = ['more', 'companies', 'season', 'me'];
 let cur = 'today', curMod = 'story', curCo = null;
 function route() {
   let h = (location.hash || '#today').slice(1).split('#')[0]; if (h.startsWith('co-')) { curCo = h.slice(3); h = 'companies' } else if (h === 'companies') curCo = null;
   if (h.startsWith('m-')) { curMod = h.slice(2); h = 'study' }
   if (!VIEWS.includes(h)) h = 'today'; cur = h;
-  document.querySelectorAll('.view').forEach(v => v.classList.toggle('on', v.id === 'v-' + h)); document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.v === h)); renderAll()
+  document.querySelectorAll('.view').forEach(v => v.classList.toggle('on', v.id === 'v-' + h)); document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.v === h || (a.dataset.v === 'more' && MORE.includes(h)))); renderAll()
 }
 function go(t) { const h = t.startsWith('study:') ? 'm-' + t.slice(6) : t.startsWith('co:') ? 'co-' + t.slice(3) : t; if (location.hash === '#' + h) route(); else location.hash = h; window.scrollTo(0, 0) }
 window.addEventListener('hashchange', () => { route(); window.scrollTo(0, 0) });
+function renderMore() {
+  const v = $('#v-more'); const live = liveCos().length, sl = slCos().length;
+  const card = (h, t, d) => `<a class="panel" href="#${h}" style="display:block;text-decoration:none;color:inherit;margin-bottom:12px"><h3 style="margin:0">${t} <span style="color:var(--sky)">›</span></h3><p class="muted" style="margin:4px 0 0">${d}</p></a>`;
+  v.innerHTML = `<h2>More</h2>` + card('companies', 'Companies', `${live} in your prep${sl ? `, ${sl} shortlisted` : ''}. Company pages, prep paths, shortlist button.`) + card('season', 'Season & EOI', 'EOI check, season charts and your decision log.') + card('me', 'Me', 'Resume, preferences and role tiers, build your CV prep with your own Claude, sign out.');
+}
 function renderAll() {
   if (!P || !P.onboarded) return;
   $('#hTitle').textContent = 'Placement prep, ' + (P.name || 'you');
   const sl = slCos(); $('#hsub').textContent = sl.length ? `Shortlist mode: ${sl.map(c => c.name).join(', ')} first.` : `${liveCos().length} live companies, no shortlist yet. General prep, weighted to your priorities.`;
-  ({ today: renderToday, study: renderStudy, companies: renderCompanies, cv: renderCV, practice: renderPractice, season: renderSeason, me: renderMe })[cur]()
+  ({ today: renderToday, study: renderStudy, companies: renderCompanies, cv: renderCV, practice: renderPractice, season: renderSeason, me: renderMe, more: renderMore })[cur]()
 }
 
 /* ---------- Do next ---------- */
 const MODBOOST = { ai: 1.9, story: 3.2, case: 2.3, guess: 2.3, ind: 2.0, digital: 1.5, tech: 1.5, mkt: 1.3, b2b: 1.1, sales: .9, saas: .9 };
 function candidates(onlyCo) {
   const out = []; const live = onlyCo ? [onlyCo] : liveCos();
-  TOPICS.forEach(t => { if (tProg(t) >= 1) return; const rel = live.filter(c => topicsFor(c).includes(t)); if (!rel.length && !['story'].includes(t.mod)) return; let sc = (MODBOOST[t.mod] || 1) * (1 + rel.reduce((a, c) => a + wt(c), 0)) * (1 - (t.i || 0) * .04) * (t.pri || 1); out.push({ id: t.id, l: t.t, sub: modById(t.mod).n, sc, go: 'study:' + t.mod + '#' + t.id, kind: 't' }) });
+  // Company-specific prep (why us, deep dives, company cases) only for P1 companies and shortlists; the rest get general prep until they shortlist you
+  const deep = onlyCo ? live : live.filter(c => coPr(c) === 'P1' || isSL(c));
+  TOPICS.forEach(t => { if (tProg(t) >= 1) return; const rel = (t.co ? deep : live).filter(c => topicsFor(c).includes(t)); if (t.co && !rel.length) return; if (!rel.length && !['story'].includes(t.mod)) return; let sc = (MODBOOST[t.mod] || 1) * (1 + rel.reduce((a, c) => a + wt(c), 0)) * (1 - (t.i || 0) * .04) * (t.pri || 1); out.push({ id: t.id, l: t.t, sub: modById(t.mod).n, sc, go: 'study:' + t.mod + '#' + t.id, kind: 't' }) });
   CVP().forEach((p, i) => { if (cvProg(p) >= 1) return; const rel = live.filter(c => cvFor(c).includes(p.id)); const sc = 2.8 * (rel.reduce((a, c) => a + wt(c), 0) + (onlyCo ? 0 : .6)) * (1 - i * .004); if (onlyCo && !rel.length) return; out.push({ id: 'cv:' + p.id, l: p.t, sub: 'CV board', sc, go: 'cv', kind: 'cv' }) });
-  live.forEach(c => { if (ck('co:' + c.id + ':why')) return; out.push({ id: 'co:' + c.id + ':why', l: `Why ${c.name}, why this role`, sub: 'Company', sc: 2.6 * Math.max(.3, wt(c)) * 1.1, go: 'co:' + c.id, kind: 'co' }) });
+  deep.forEach(c => { if (ck('co:' + c.id + ':why')) return; out.push({ id: 'co:' + c.id + ':why', l: `Why ${c.name}, why this role`, sub: 'Company', sc: 2.6 * Math.max(.3, wt(c)) * 1.1, go: 'co:' + c.id, kind: 'co' }) });
   return out.sort((a, b) => b.sc - a.sc)
 }
 function doNext() {
@@ -507,7 +516,7 @@ function renderStudy() {
   h += ts.map(t => {
     const done = tProg(t); const subs = subsFor(t).map(bankById);
     const rel = liveCos().filter(c => topicsFor(c).includes(t)).map(c => c.name.split(' ')[0]);
-    return `<details class="topic tp" id="${esc(t.id)}"${location.hash.includes(t.id) ? ' open' : ''}><summary><div class="chk" style="border:0;padding:0">${subs.length ? `<span class="chip${done >= 1 ? ' ok' : done > 0 ? ' warn' : ''}">${subs.filter(b => ck('b:' + b.id)).length}/${subs.length}</span>` : `<input type="checkbox" data-ck="${t.id}"${ck(t.id) ? ' checked' : ''} aria-label="Done">`}<label><h3 style="display:inline">${esc(t.t)}</h3>${rel.length && rel.length < 8 ? ` <span class="muted">· ${esc(rel.join(', '))}</span>` : ''}</label></div></summary>
+    return `<details class="topic tp" id="${esc(t.id)}"${location.hash.includes(t.id) ? ' open' : ''}><summary><div class="chk" style="border:0;padding:0">${subs.length ? `<span class="chip${done >= 1 ? ' ok' : done > 0 ? ' warn' : ''}">${subs.filter(b => ck('b:' + b.id)).length}/${subs.length}</span>` : `<input type="checkbox" data-ck="${t.id}"${ck(t.id) ? ' checked' : ''} aria-label="Done">`}<span class="lbl" style="flex:1;cursor:pointer"><h3 style="display:inline">${esc(t.t)}</h3>${rel.length && rel.length < 8 ? ` <span class="muted">· ${esc(rel.join(', '))}</span>` : ''}</span><span class="chev" aria-hidden="true">▾</span></div></summary>
     <div class="body">${t.h}</div>${subs.length ? `<div class="mt">${subs.map(bankRow).join('')}</div>` : ''}${t.q ? `<div class="q"><b>Test yourself:</b> ${esc(t.q)} <button class="sm ghost" data-quiz="${t.id}" style="border:0;color:var(--sky)">Mock me on this</button></div>` : ''}
     ${t.hr ? hrBank() : ''}</details>` }).join('');
   h += '</div>'; v.innerHTML = h;
@@ -603,7 +612,7 @@ function renderPractice() {
   const v = $('#v-practice');
   if (!v.dataset.built) {
     v.dataset.built = 1;
-    v.innerHTML = `<div class="g2"><div class="panel"><h2>Mock interviewer</h2><p class="muted" style="margin-top:0">Claude asks one question for the company and type you pick, then scores your answer and asks the follow-up a panel would.</p>
+    v.innerHTML = `<div class="g2"><div class="panel"><h2>Mock interviewer</h2><p class="muted" style="margin-top:0">Claude asks one question for the company and type you pick, then scores your answer and asks the follow-up a panel would.</p><p class="note" style="border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-top:8px"><b>Paid AI.</b> Each question and each scoring costs real money, so there's a limit of 20 AI uses a day per person (about 10 scored answers). Write your answer properly before you tap score. To practise for free, use the question bank in Study, or open a case and speak your answer out loud.</p>
     <div class="row2 mt"><select id="pCo"></select><select id="pType">${TYPES.map(t => `<option>${t}</option>`).join('')}</select><button class="pri" id="pAsk">Ask me</button></div>
     <div id="pQ" class="mt"></div><div id="pAnsWrap" class="mt" hidden><textarea id="pAns" placeholder="Answer as you would in the room. Rough is fine."></textarea>
     <div class="row2 mt"><button id="pMic" hidden>🎙 Speak it</button><button class="pri" id="pEval">Score my answer</button><span class="sp"></span><span class="note" id="pStat"></span></div></div><div id="pFb" class="mt"></div></div>
@@ -747,6 +756,7 @@ function renderMe() {
   <h3 class="mt">Your resume</h3><p class="muted" style="margin-top:0">${CVP().length} pointers on your CV board. One resume per account; replacing it rebuilds your board (your ticks on old pointers are kept by pointer id).</p><input id="meCV" type="file" accept=".pdf,.docx"><p class="note" id="meCVm"></p>
   ${pf.floor ? `<h3 class="mt2">Your EOI rules</h3><p class="muted" style="margin-top:0">Floor ${L(pf.floor)} fixed · brand weight ${pf.brand}/4 · 6-day week: ${esc(pf.six)}${pf.goal ? ' · Goal: ' + esc(pf.goal) : ''}</p>` : ''}
   <p class="muted">Your model has learned from ${(P.eoi_rows || []).length} answers.</p>
+  <div class="row2"><button id="meEdit" class="sm">Change preferences and role tiers</button></div>
   <div class="row2 mt"><button id="meOut" class="ghost">Sign out</button></div></div>
   <div class="panel"><h3>Build your CV prep with your own Claude</h3><p class="muted" style="margin-top:0">Free with your own Claude account. Copy this prompt into a new Claude chat, attach your resume (and paste any CV critique notes), then paste Claude's reply below. It fills your CV board (STAR stories, likely questions, how to defend each number), your HR answers, and cases and guesstimates built from your CV.</p>
   <div class="row2"><button id="cpP">Copy prompt</button><span class="note" id="cpM"></span></div>
@@ -754,10 +764,11 @@ function renderMe() {
   <div class="panel"><h3>Install on your phone</h3><ul class="tight"><li><b>iPhone:</b> open this site in Safari → Share → Add to Home Screen.</li><li><b>Android:</b> open in Chrome → ⋮ → Install app (or Add to Home screen).</li></ul>
   <h3 class="mt2">AI use today</h3><p class="muted" id="meAI">…</p><p class="note">AI is used only for mock-interview questions and scoring, and for reading a resume. The EOI verdict runs on your phone for free.</p></div></div>`;
   $('#meOut').onclick = async () => { await flush(); await sb.auth.signOut() };
+  $('#meEdit').onclick = () => { OB.step = 2; OB.edit = true; showOnboarding() };
   $('#cpP').onclick = async () => { const t = importPrompt(); try { await navigator.clipboard.writeText(t); $('#cpM').textContent = 'Copied. Paste it into a new Claude chat.' } catch (e) { $('#impT').value = t; $('#impT').select(); $('#cpM').textContent = 'Copy the text in the box below, then clear it.' } };
   $('#impGo').onclick = async () => { const r = parseImport($('#impT').value); if (r.err) { $('#impM').textContent = r.err; return } const cv = { ...(P.cv || {}), ...r.cv }; await saveProfile({ cv }); $('#impM').textContent = `Imported: ${(cv.pointers || []).length} pointers, ${Object.keys(cv.hr || {}).length} HR answers, ${(cv.bank || []).length} cases and guesstimates.`; renderAll(); toast(`Imported ${(cv.pointers || []).length} pointers, ${Object.keys(cv.hr || {}).length} HR answers, ${(cv.bank || []).length} cases and guesstimates.`) };
   $('#meCV').onchange = async e => { const f = e.target.files[0]; if (!f) return; $('#meCVm').textContent = 'Reading…'; try { const txt = await readFile(f); $('#meCVm').textContent = 'Rebuilding your board…'; let cv; try { cv = (await ai('parse_resume', { text: txt.slice(0, 14000) })).cv } catch (er) { cv = naiveParse(txt) } if (P.cv && P.cv.hr) cv.hr = P.cv.hr; await saveProfile({ resume_text: txt.slice(0, 20000), cv }); $('#meCVm').textContent = 'Done.'; renderAll() } catch (er) { $('#meCVm').textContent = er.message } };
-  sb.from('pp_ai_usage').select('n').eq('day', todayIST()).maybeSingle().then(({ data }) => { const el = $('#meAI'); if (el) el.textContent = `${data ? data.n : 0} of 40 AI calls used today.` })
+  sb.from('pp_ai_usage').select('n').eq('day', todayIST()).maybeSingle().then(({ data }) => { const el = $('#meAI'); if (el) el.textContent = `${data ? data.n : 0} of 20 AI calls used today (each mock question and each scoring uses one).` })
 }
 
 /* ---------- events ---------- */

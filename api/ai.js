@@ -1,10 +1,10 @@
 // Server-side AI for mock interviews and resume parsing.
 // The Anthropic key lives only in Vercel's environment (ANTHROPIC_API_KEY). Prompts are fixed here,
-// so the app can't be used as a general chatbot. Each user gets 40 calls a day; everyone together 150.
+// so the app can't be used as a general chatbot. Each user gets 20 calls a day (about 10 scored answers); everyone together 60.
 const SB_URL = 'https://towxfwpgywxbqfrppidu.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRvd3hmd3BneXd4YnFmcnBwaWR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ5OTM2NTQsImV4cCI6MjExMDU2OTY1NH0.WAsgBwGN3bN46GzMPziMpjmZtHeBrFLh3kaRpV4SfYs';
 const FAST = 'claude-haiku-5-5', SMART = 'claude-sonnet-5-5';
-const MINE_CAP = 40, ALL_CAP = 150;
+const MINE_CAP = 20, ALL_CAP = 60;
 
 async function claude(model, system, user, max_tokens) {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
